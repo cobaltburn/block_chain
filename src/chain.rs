@@ -1,6 +1,6 @@
-use std::fs;
+use std::{fs, io};
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Write, BufRead};
 use std::sync::mpsc;
 use crypto_hash::{Algorithm, hex_digest};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,13 +25,12 @@ impl Block {
         let id = previous_block.id + 1;
 
         let (tx, rx) = mpsc::channel();
-
-        for _ in 0..4 {
+        for _ in 0..14 {
             let tx = tx.clone();
             let previous_hash = previous_block.previous_hash.clone();
             spawn(move || {
                 let mut result = None;
-                let proof = "00000";
+                let proof = "000000";
                 let mut rng = rand::thread_rng();
                 loop {
                     let proof_of_work: i64 = rng.gen();
@@ -48,9 +47,8 @@ impl Block {
             });
         }
         let (proof_of_work, hash) = loop {
-            match rx.recv().unwrap() {
-                Some(x) => break x,
-                None => (),
+            if let Some(proof) = rx.recv().unwrap() {
+                break proof
             }
         };
 
@@ -91,6 +89,33 @@ impl Chain {
         Chain { chain: vec![new_block]}
     }
 
+    pub fn from(file: File) -> Chain {
+        let file_iter = io::BufReader::new(file).lines();
+        let mut chain = Vec::new();
+        for  line in file_iter {
+            if let Ok(block) = line {
+                let mut block_vals = block.split(", ");
+                chain.push(Block {
+                    id: block_vals.next().unwrap().parse::<i32>().unwrap(),
+                    time: block_vals.next().unwrap().parse::<u64>().unwrap(),
+                    previous_hash: String::from(block_vals.next().unwrap()),
+                    proof_of_work: block_vals.next().unwrap().parse::<i64>().unwrap(),
+                    hash: String::from(block_vals.next().unwrap())
+                });
+            }
+        }
+        if !Chain::validate(&chain) {
+            panic!("Invalid chain");
+        }
+        Chain { chain }
+    }
+
+    fn validate (chain: &Vec<Block>) -> bool {
+        chain
+            .iter()
+            .zip(chain.iter().skip(1))
+            .all(|(current, next)| current.hash == next.previous_hash )
+    }
 }
 
 impl Chain {
@@ -118,6 +143,7 @@ impl Chain {
 
 
 mod tests {
+    #[warn(unused_imports)]
     use super::*;
 
     #[test]
