@@ -1,11 +1,13 @@
 use std::{fs, io};
 use std::fs::{File, OpenOptions};
 use std::io::{Write, BufRead};
+use std::process::id;
+use std::ptr::hash;
 use std::sync::mpsc;
-use crypto_hash::{Algorithm, hex_digest};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::Rng;
 use std::thread::spawn;
+use crypto_hash::{Algorithm,hex_digest};
 
 #[derive(Debug)]
 struct Block {
@@ -27,17 +29,20 @@ impl Block {
         let (tx, rx) = mpsc::channel();
         for _ in 0..14 {
             let tx = tx.clone();
-            let previous_hash = previous_block.previous_hash.clone();
+            let previous_hash = previous_block.hash.clone();
             spawn(move || {
                 let mut result = None;
                 let proof = "000000";
                 let mut rng = rand::thread_rng();
                 loop {
                     let proof_of_work: i64 = rng.gen();
-                    let format_block = format!("{}{}{}{}", id, time, previous_hash, proof_of_work);
-                    let hash = hex_digest(Algorithm::SHA256, format_block.as_bytes());
+                    let hash = hex_digest(
+                        Algorithm::SHA256,
+                        format!("{}{}{}{}", id, time, previous_hash, proof_of_work)
+                            .as_bytes()
+                    );
                     if proof == &hash[..proof.len()] {
-                        result = Some((proof_of_work, hash))
+                        result = Some((proof_of_work, hash));
                     }
                     match tx.send(result.clone()) {
                         Ok(_) => (),
@@ -46,16 +51,15 @@ impl Block {
                 }
             });
         }
-        let (proof_of_work, hash) = loop {
-            if let Some(proof) = rx.recv().unwrap() {
-                break proof
+        loop {
+            if let Some((proof_of_work, hash)) = rx.recv().unwrap() {
+                return Block {
+                    id, time, proof_of_work, hash,
+                    previous_hash: previous_block.hash.clone(),
+                }
             }
         };
 
-        Block {
-            id, time, proof_of_work, hash,
-            previous_hash: previous_block.hash.clone(),
-        }
     }
 }
 
@@ -71,21 +75,31 @@ pub struct Chain {
 
 impl Chain {
     pub fn new() -> Chain {
-        let blank = Block {
-            id: 0,
-            time: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time went backwards")
-                .as_secs(),
-            previous_hash: String::from(""),
-            proof_of_work: 0,
-            hash: String::from("0000000000000000000000000000000000000000000000000000000000000000"),
-        };
-        let new_block = Block::new(&blank);
-        let mut file = File::create("/home/michael/Documents/test/block_chain1.txt").expect("file creation failed");
+        let id = 0;
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_secs();
+        let previous_hash = String::from("0000000000000000000000000000000000000000000000000000000000000000");
+        let proof_of_work: i64 = 0;
+        let hash = hex_digest(
+            Algorithm::SHA256,
+            format!("{}{}{}{}", id, time, previous_hash, proof_of_work)
+                .as_bytes()
+        );
+        let new_block = Block::new(&Block{
+            id,
+            time,
+            previous_hash,
+            proof_of_work,
+            hash
+        });
+        let mut file = File::create("/home/michael/Documents/test/block_chain1.txt")
+            .expect("file creation failed");
         let block_string = new_block.string();
         println!("{}", block_string);
-        file.write_all(block_string.as_bytes()).expect("write failed");
+        file.write_all(block_string.as_bytes())
+            .expect("write failed");
         Chain { chain: vec![new_block]}
     }
 
@@ -114,7 +128,15 @@ impl Chain {
         chain
             .iter()
             .zip(chain.iter().skip(1))
-            .all(|(current, next)| current.hash == next.previous_hash )
+            .all(|(current, next)|
+                     hex_digest(Algorithm::SHA256,
+                                format!("{}{}{}{}",
+                                        current.id,
+                                        current.time,
+                                        current.previous_hash,
+                                        current.proof_of_work)
+                                    .as_bytes()
+                     ) == next.previous_hash )
     }
 }
 
@@ -156,17 +178,21 @@ mod tests {
                 .as_secs(),
             previous_hash: String::from(""),
             proof_of_work: 0,
-            hash: String::from(""),
+            hash: String::from("0000000000000000000000000000000000000000000000000000000000000000"),
         };
         let new = Block::new(&blank);
-        println!("{}, {}, {}, {}, {}", new.id, new.time, new.previous_hash, new.proof_of_work, new.hash)
+        println!("{}, {}, {}, {}, {}", new.id, new.time, new.previous_hash, new.proof_of_work, new.hash);
     }
     #[test]
-    fn start_chain () {
-        let mut x = Chain::new();
-        for _ in 0..9 {
-            x.add_block()
-        }
+    fn check_hash() {
+        let id = 1;
+        let time = 1669066161;
+        let previous_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+        let proof_of_work: i64 = 8805102349990813383;
+        let x = hex_digest(Algorithm::SHA256,
+                   format!("{}{}{}{}", id, time, previous_hash, proof_of_work).as_bytes());
+
+        println!("{}", x == "00009292bc04348d9bf2aa34024b0d8325af69a984af41af967b3651780613d0")
     }
 
 }

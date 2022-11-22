@@ -1,3 +1,5 @@
+extern crate core;
+
 use std::env;
 use std::fs::File;
 use crate::chain::Chain;
@@ -9,7 +11,7 @@ fn main() {
     let mut file_name: String = String::from("");
     let mut chain: Chain;
     while let Some(arg) = args.next() {
-        if arg == "f" {
+        if arg == "~f" {
             file_name = args.next().expect("No argument found");
         }
     }
@@ -17,10 +19,10 @@ fn main() {
     let blocks_added= if file_name != "" {
         let file = File::open(file_name).expect("Invalid file argument");
         chain = Chain::from(file);
-        100
+        10
     } else {
         chain = Chain::new();
-        99
+        9
     };
     for _ in 0..blocks_added {
         chain.add_block();
